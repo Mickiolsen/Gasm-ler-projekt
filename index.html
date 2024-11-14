@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Data Logger</title>
+    <!-- <link rel="stylesheet" href="style.css"> -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">ESP32 Data Logger</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="javascript:void(0);" onclick="showOnlineData()">Online Data</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="javascript:void(0);" onclick="showGraph()">Graf</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="javascript:void(0);" onclick="showService()">Service</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="javascript:void(0);" onclick="showDownload()">Download CSV</a>
+                    </li>                    
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div id="onlineData" style="display:none;">
+            <h2>Online Data</h2>
+            <div id="dataContainer">Venter på data...</div>
+        </div>
+
+        <div id="graph" style="display:none;">
+            <h2>Akkumuleret Forbrug</h2>
+            <canvas id="dataChart" width="400" height="200"></canvas>
+        </div>
+
+        <div id="serviceSection" style="display:none;">
+            <h3>Service Functions</h3>
+            <button class="btn btn-danger" onclick="clearCSV()">Clear CSV</button>
+            <button class="btn btn-secondary" onclick="resetGraph()">Nulstil Graf</button>
+            <button class="btn btn-primary" onclick="clearWiFiConfig()">Clear WiFi Config</button>
+        </div>
+
+        <div id="downloadSection" style="display:none;">
+            <h3>Download CSV</h3>
+            <button class="btn btn-success" onclick="downloadCSV()">Download CSV-fil</button>
+        </div>        
+    </div>
+
+    <script>
+        const socket = new WebSocket('ws://' + window.location.hostname + '/ws');
+        
+        socket.onopen = function() { console.log("WebSocket connected"); };
+        
+        socket.onmessage = function(event) {
+            const message = event.data;
+            if (message.startsWith("touchData:")) {
+                const touchCount = parseInt(message.split(":")[1]);
+                document.getElementById('dataContainer').innerHTML = 'Touch Count: ' + touchCount;
+                addDataToGraph(touchCount);
+            }
+        };
+        
+        const ctx = document.getElementById('dataChart').getContext('2d');
+        const dataChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(10).fill(''),
+                datasets: [{ label: 'Accumulated Data', data: Array(10).fill(0), borderColor: 'rgba(75, 192, 192, 1)', borderWidth: 2 }]
+            },
+            options: {
+                scales: { x: { beginAtZero: true }, y: { beginAtZero: true } }
+            }
+        });
+        
+        function addDataToGraph(newData) {
+            dataChart.data.datasets[0].data.push(newData);
+            if (dataChart.data.datasets[0].data.length > 10) {
+                dataChart.data.datasets[0].data.shift();
+            }
+            dataChart.update();
+        }
+        
+        function showOnlineData() {
+            document.getElementById('onlineData').style.display = "block";
+            document.getElementById('graph').style.display = "none";
+            document.getElementById('serviceSection').style.display = "none";
+            document.getElementById('downloadSection').style.display = "none";
+        }
+
+        function showGraph() {
+            document.getElementById('onlineData').style.display = "none";
+            document.getElementById('graph').style.display = "block";
+            document.getElementById('serviceSection').style.display = "none";
+            document.getElementById('downloadSection').style.display = "none";
+            fetchCSVData();
+        }
+
+        function showService() {
+            document.getElementById('onlineData').style.display = "none";
+            document.getElementById('graph').style.display = "none";
+            document.getElementById('serviceSection').style.display = "block";
+            document.getElementById('downloadSection').style.display = "none";
+        }
+
+        function showDownload() {
+            document.getElementById('onlineData').style.display = "none";
+            document.getElementById('graph').style.display = "none";
+            document.getElementById('serviceSection').style.display = "none";
+            document.getElementById('downloadSection').style.display = "block";
+        }
+    
+        function downloadCSV() {
+            window.location.href = '/download-csv';
+        }
+
+        async function fetchCSVData() {
+            const response = await fetch('/get-data');
+            const csvData = await response.text();
+            const rows = csvData.split('\n');
+            rows.forEach(row => {
+                if (row) {
+                    const value = parseInt(row.split(',')[0]);
+                    if (!isNaN(value)) {
+                        addDataToGraph(value);
+                    }
+                }
+            });
+        }
+
+        function clearCSV() {
+            fetch('/clear-csv', { method: 'POST' })
+                .then(response => response.text())
+                .then(data => alert(data))
+                .catch(error => alert('Fejl: ' + error));
+        }
+
+        function clearWiFiConfig() {
+            fetch('/clear-wifi-config', { method: 'POST' })
+                .then(response => response.text())
+                .then(data => alert(data))
+                .catch(error => alert('Fejl: ' + error));
+        }
+
+        // Funktion til at nulstille grafen
+        function resetGraph() {
+            fetch('/reset-graph', { method: 'POST' })
+                .then(response => response.text())
+                .then(data => {
+                    alert(data);
+                    dataChart.data.datasets[0].data = Array(10).fill(0);  // Nulstil grafens data
+                    dataChart.update();
+                    touchCount = 0;  // Nulstil touch count til 0
+                    document.getElementById('dataContainer').innerHTML = 'Touch Count: ' + touchCount;
+                })
+                .catch(error => alert('Fejl: ' + error));
+        }
+
+        window.onload = function() { showOnlineData(); };
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
